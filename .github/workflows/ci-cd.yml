@@ -92,34 +92,78 @@ jobs:
 
       - name: Check-out repository
         uses: actions/checkout@v4
-
-      - name: Authenticate with GCP
-        id: 'auth'
-        uses: 'google-github-actions/auth@v1'
         with:
-          token_format: access_token
-          workload_identity_provider: 'projects/812757215434/locations/global/workloadIdentityPools/identitypool-global/providers/provider-github'
-          service_account: 'serviceaccount-github-actions@cryptic-hawk-387713.iam.gserviceaccount.com'
-          access_token_lifetime: 300s
-          create_credentials_file: true
+          fetch-depth: 0
 
       - name: Install poetry
         uses: snok/install-poetry@v1
 
-      - name: Install package
-        run: poetry install
+      #- name: Authenticate with GCP
+      #  id: 'auth'
+      #  uses: 'google-github-actions/auth@v1'
+      #  with:
+      #    token_format: access_token
+      #    workload_identity_provider: 'projects/812757215434/locations/global/workloadIdentityPools/identitypool-global/providers/provider-github'
+      #    service_account: 'serviceaccount-github-actions@cryptic-hawk-387713.iam.gserviceaccount.com'
+      #    access_token_lifetime: 300s
+      #    create_credentials_file: true
+#
+      #- name: Install poetry
+      #  uses: snok/install-poetry@v1
+#
+      #- name: Install package
+      #  run: poetry install
+#
+      #- name: Build lib for release
+      #  run: poetry build
+#
+      #- name: Publish package to GCP artifact registry
+      #  run: |
+      #    poetry self add keyrings.google-artifactregistry-auth@latest
+      #    poetry config repositories.gcp-registry ${{ secrets.TQ_GCP_ARTIFACT_REGISTRY_UPLOAD }}
+      #    poetry publish -r gcp-registry
+#
+      #- name: Publish package to PYPI
+      #  env:
+      #    POETRY_PYPI_TOKEN_PYPI: ${{ secrets.POETRY_PYPI_TOKEN_PYPI }}
+      #  run: |
+      #    poetry publish
 
-      - name: Build lib for release
-        run: poetry build
+      - name: Get version
+        id: get_version
+        run: echo "version=$(poetry version --short)" >> $GITHUB_OUTPUT
 
-      - name: Publish package to GCP artifact registry
-        run: |
-          poetry self add keyrings.google-artifactregistry-auth@latest
-          poetry config repositories.gcp-registry ${{ secrets.TQ_GCP_ARTIFACT_REGISTRY_UPLOAD }}
-          poetry publish -r gcp-registry
-
-      - name: Publish package to PYPI
+      - name: Build changelog
+        id: build_changelog
+        uses: mikepenz/release-changelog-builder-action@v5
         env:
-          POETRY_PYPI_TOKEN_PYPI: ${{ secrets.POETRY_PYPI_TOKEN_PYPI }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          fetchViaCommits: true
+          toTag: ${{ github.sha }}
+          configurationJson: |
+            {
+              "template": "## Release ${{ steps.get_version.outputs.version }}\n\n#{{CHANGELOG}}",
+              "categories": [
+                {
+                    "title": "### Changes",
+                    "labels": []
+                }
+              ]
+            }
+
+      - name: Create tag with version
+        id: create_tag
+        env:
+          TAG: ${{ steps.get_version.outputs.version }}
         run: |
-          poetry publish
+          git config user.name "GitHub"
+          git tag -a "$TAG" -m "Published version ${TAG}" "${GITHUB_SHA}"
+          git push origin "$TAG"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.build_changelog.outputs.changelog }}
+          tag_name: ${{ steps.get_version.outputs.version }}
+
